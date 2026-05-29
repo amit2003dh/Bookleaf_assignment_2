@@ -1,0 +1,313 @@
+{
+  "meta": {
+    "instanceId": "cb8769352e89d8f344bf679c6fa074744d0362f6b4d3d2ea58d1ff6cf7443831"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "author-royalty-summary",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a6df31bd-cb00-47b2-a4e9-53e77f0ddb3f",
+      "name": "Bubble Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers[\"x-bookleaf-secret-token\"] }}",
+              "value2": "secure_secret_token_123"
+            }
+          ]
+        }
+      },
+      "id": "ca1278ff-c967-4eb2-a63e-db21b85fe12c",
+      "name": "Check Secret Token",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Unauthorized request: Invalid token provided."
+      },
+      "id": "e4b6c8aa-cb20-437a-9a99-b1d5291b7d53",
+      "name": "Return 401 Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        520,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $node[\"Bubble Webhook Trigger\"].json.body.bubble_api_url || 'https://your-bubble-app.bubbleapps.io/version-test/api/1.1' }}/obj/notification_log",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"Bubble Webhook Trigger\"].json.body.bubble_api_token || 'your_bubble_api_token_here' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"author_id\": \"{{ $node[\"Bubble Webhook Trigger\"].json.body.author_id }}\",\n  \"status\": \"Processing\",\n  \"triggered_by\": \"{{ $node[\"Bubble Webhook Trigger\"].json.body.triggered_by || 'Admin Portal' }}\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "dcf3b190-2c70-4f51-b847-ca072d6ffbba",
+      "name": "Create Processing Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        520,
+        180
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bubble-api-creds-id",
+          "name": "Bubble API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date(\"2026-05-26\"); // System baseline time reference\nconst webhookBody = $('Bubble Webhook Trigger').first().json.body;\n\n// We support either full payload ingestion directly from Bubble or dynamic fetching.\n// For the primary path, we parse the structured webhookBody.\nlet author = webhookBody;\n\nconst name = author.name || \"Author\";\nconst email = author.email || \"\";\nconst authorId = author.author_id || author.unique_id || \"\";\nconst city = author.city || \"\";\nconst books = author.books || [];\nconst logId = $('Create Processing Log').first().json.response?.id || \"\";\n\nlet totalEarned = 0;\nlet totalPaid = 0;\nlet totalPending = 0;\nlet bookList = [];\n\nfor (const book of books) {\n  const earned = book.total_royalty_earned || 0;\n  const paid = book.royalty_paid || 0;\n  const pending = book.royalty_pending || 0;\n  totalEarned += earned;\n  totalPaid += paid;\n  totalPending += pending;\n\n  // Royalty Status Indicator Rules:\n  // - Green: pending is 0 (fully paid)\n  // - Yellow: pending > 0 but within normal cycle (last payout is within 90 days or brand new published book < 90 days)\n  // - Red: pending > 0 AND (last payout > 90 days ago OR no payout ever made for a published book older than 90 days)\n  let status = \"Green\";\n  let reason = \"All royalties fully paid up.\";\n  \n  if (pending > 0) {\n    status = \"Yellow\";\n    reason = \"Pending royalty within the standard payout cycle.\";\n    \n    if (book.last_royalty_payout_date) {\n      const lastPayout = new Date(book.last_royalty_payout_date);\n      const diffTime = Math.abs(today - lastPayout);\n      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));\n      if (diffDays > 90) {\n        status = \"Red\";\n        reason = `Royalty pending and last payout was ${diffDays} days ago (exceeds 90-day threshold).`;\n      }\n    } else if (book.publication_date && book.status === \"Published & Live\") {\n      const pubDate = new Date(book.publication_date);\n      const diffTime = Math.abs(today - pubDate);\n      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));\n      if (diffDays > 90) {\n        status = \"Red\";\n        reason = `Published ${diffDays} days ago, pending royalties exist, and no payout has ever been made (exceeds 90-day threshold).`;\n      }\n    }\n  }\n\n  bookList.push({\n    book_id: book.book_id,\n    title: book.title,\n    isbn: book.isbn,\n    genre: book.genre,\n    status: book.status,\n    publication_date: book.publication_date || \"N/A\",\n    mrp: book.mrp || null,\n    copies_sold: book.total_copies_sold || 0,\n    earned: earned,\n    paid: paid,\n    pending: pending,\n    last_payout: book.last_royalty_payout_date || \"None\",\n    print_partner: book.print_partner || \"N/A\",\n    payout_status: status,\n    payout_status_reason: reason\n  });\n}\n\nreturn [{\n  json: {\n    author_id: authorId,\n    name: name,\n    email: email,\n    city: city,\n    log_id: logId,\n    summary: {\n      total_books: books.length,\n      published_books: bookList.filter(b => b.status === \"Published & Live\").length,\n      production_books: bookList.filter(b => b.status !== \"Published & Live\").length,\n      total_earned: totalEarned,\n      total_paid: totalPaid,\n      total_pending: totalPending,\n      has_overdue: bookList.some(b => b.payout_status === \"Red\")\n    },\n    books: bookList,\n    payout_policy: {\n      cycle: \"Quarterly (45 days after calendar quarter close)\",\n      rule: \"Royalties for Q1 (Jan-Mar) are paid by May 15, Q2 (Apr-Jun) by Aug 15, Q3 (Jul-Sep) by Nov 15, and Q4 (Oct-Dec) by Feb 15 of the following year.\"\n    }\n  }\n}];"
+      },
+      "id": "51253afb-c37f-4428-ba09-66c3cd4b802a",
+      "name": "Format Royalty Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $('Bubble Webhook Trigger').first().json.body.gemini_api_key || 'YOUR_GEMINI_API_KEY_HERE' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "headersJson": "{\n  \"Content-Type\": \"application/json\"\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are BookLeaf Publishing's automated finance operations manager. Write a professional, policy-compliant email summarizing royalty earnings for an author. Use a warm, professional corporate closing matching BookLeaf's guidelines.\\n\\nFinancial Rules:\\n1. Royalty Payment Cycle: Royalties are calculated quarterly and distributed within 45 days after the close of each calendar quarter.\\n   - Q1 (Jan-March) closing: Paid by May 15\\n   - Q2 (April-June) closing: Paid by August 15\\n   - Q3 (July-September) closing: Paid by November 15\\n   - Q4 (October-December) closing: Paid by February 15 of the next year\\n2. If the author has a pending royalty balance (total pending > 0), reference the next quarterly cycle date when they can expect their payment. Present this cycle calendar as helpful information.\\n3. If all royalties are fully paid up (total pending is 0), provide a positive acknowledgement.\\n4. If any books are still in production (status is 'In Production' or similar), acknowledge them and explain that sales and royalty tracking will begin once the book is published and live on platforms.\\n\\nAuthor Context:\\n- Author Name: {{ $json.name }}\\n- Email: {{ $json.email }}\\n- Total Books: {{ $json.summary.total_books }}\\n- Total Royalty Earned: INR {{ $json.summary.total_earned }}\\n- Total Royalty Paid: INR {{ $json.summary.total_paid }}\\n- Total Royalty Pending: INR {{ $json.summary.total_pending }}\\n\\nDetailed Book List:\\n{{ JSON.stringify($json.books, null, 2) }}\\n\\nInstructions for Email Structure:\\n- Start with a personalized greeting: 'Dear [Author Name],'\\n- Provide an encouraging opening. Acknowledge their partnership with BookLeaf.\\n- Include a summary section with overall royalty figures (earned, paid, pending).\\n- Include a book-by-book list detailing Title, Status, Copies Sold, and Payout Status (highlighting any flagged as Red/overdue or Yellow/pending with appropriate operational notes. Handle books in production gracefully).\\n- Provide a section describing the Quarterly Payout Cycle and the specific next payout date based on current month (May 2026). The current calendar quarter is Q2 2026 (Apr-Jun), which closes June 30, and the payout will occur by August 15, 2026.\\n- Close with a warm, supportive signature from the 'BookLeaf Publishing Finance Team'.\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "bfd60067-1756-4c92-95f0-5175cf6d2ffb",
+      "name": "Generate Email with Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        940,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "finance@bookleafpub.com",
+        "toEmail": "={{ $('Format Royalty Data').first().json.email }}",
+        "subject": "=BookLeaf Publishing - Your Author Royalty & Payout Summary",
+        "html": "={{ $json.candidates[0].content.parts[0].text.replace(/\\n/g, '<br>') }}",
+        "options": {}
+      },
+      "id": "e2dfb94a-810a-48d6-a212-321ab968a3fb",
+      "name": "Send Email to Author",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        180
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Bubble Webhook Trigger').first().json.body.bubble_api_url || 'https://your-bubble-app.bubbleapps.io/version-test/api/1.1' }}/obj/notification_log/{{ $('Format Royalty Data').first().json.log_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Bubble Webhook Trigger').first().json.body.bubble_api_token || 'your_bubble_api_token_here' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"Success\",\n  \"email_content\": \"{{ $('Generate Email with Gemini').first().json.candidates[0].content.parts[0].text.replace(/\"/g, '\\\\\"').replace(/\\n/g, '\\\\n') }}\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "5dc36b4a-a43b-4860-91a5-e11a37c92b2c",
+      "name": "Callback Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1380,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Bubble Webhook Trigger').first().json.body.bubble_api_url || 'https://your-bubble-app.bubbleapps.io/version-test/api/1.1' }}/obj/notification_log/{{ $('Format Royalty Data').first().json.log_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Bubble Webhook Trigger').first().json.body.bubble_api_token || 'your_bubble_api_token_here' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"Failed\",\n  \"email_content\": \"Failed to compile royalty notification. Please check workflow execution logs in n8n.\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "31b239ff-5ca2-482f-b49d-e4ccfb7aa311",
+      "name": "Callback Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1160,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Royalty summary triggered. Check Notification Log in Bubble for updates.\"\n}"
+      },
+      "id": "97e68e4a-2f47-498c-85a0-d12349be8d7c",
+      "name": "Return Webhook Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1580,
+        180
+      ]
+    }
+  ],
+  "connections": {
+    "Bubble Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Secret Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Secret Token": {
+      "main": [
+        [
+          {
+            "node": "Create Processing Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return 401 Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Processing Log": {
+      "main": [
+        [
+          {
+            "node": "Format Royalty Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Royalty Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Email with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Email with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Author",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Author": {
+      "main": [
+        [
+          {
+            "node": "Callback Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Callback Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback Success": {
+      "main": [
+        [
+          {
+            "node": "Return Webhook Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f7d79b94-82ea-42f2-8924-d2e8bfa175e1",
+  "id": "bdf234ef",
+  "name": "BookLeaf Royalty Summary & Notification System"
+}
