@@ -151,29 +151,3 @@ I spent significant time learning Bubble's modern Flexbox layout engine:
 
 ---
 
-## 7. Screen Recording (Loom) Script (3-5 Minutes)
-
-Here is the script I prepared for my walkthrough video:
-
-1. Introduction (30 seconds):
-   - State my name and introduce the Author Royalty System.
-   - Show the three files in the workspace (sample data, n8n workflow, and README).
-2. Bubble Database Setup (45 seconds):
-   - Open the Bubble Editor. Go to the Data tab and show the User, Book, and Notification_Log types.
-   - Show the Privacy tab and explain how authors are isolated from viewing other authors' data.
-3. Author Dashboard Demo (45 seconds):
-   - Run the app and log in as Priya Sharma.
-   - Show the metrics cards (Total, Paid, Pending) and the list of books.
-   - Point out the status badges (Green, Yellow, Red) and explain the 90-day overdue logic.
-4. Admin Dashboard Demo (60 seconds):
-   - Log in as the Admin user.
-   - Demonstrate searching by name and filtering by city and royalty status.
-   - Select Priya Sharma, show her detail sidebar, and click "Generate & Send".
-   - Show that the button disables and changes to "Processing...".
-5. n8n Execution (30 seconds):
-   - Switch to n8n and show the execution logs turning green.
-   - Explain how the data formatting, Gemini API call, and callback nodes executed.
-6. Callback Validation (30 seconds):
-   - Go back to Bubble and show the updated Notification Log at the bottom of the admin page.
-   - Show that the status changed to "Success" and display the generated email content.
-   - Show that the button is now re-enabled.
