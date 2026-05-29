@@ -151,3 +151,4 @@ I spent significant time learning Bubble's modern Flexbox layout engine:
 
 ---
 
+###Live Link : https://author-royalty-dashboard-90058.bubbleapps.io/version-test/admin_dashboard?debug_mode=true
